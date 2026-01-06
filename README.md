@@ -67,7 +67,7 @@
 
 「何を買ったか」を記録します。
 
-* **`m_store_branches`** / **`m_brands**`: 店舗とブランドの親子関係。
+* **`m_store_branches`** / **`m_brands`**: 店舗とブランドの親子関係。
 * **`t_transactions`**: 取引ヘッダー。日時と合計金額、税調整額を管理。
 * **`t_transaction_details`**: レシートの明細行。ここで `food_type` を指定し、食品マスタとリンクさせます。
 
