@@ -141,7 +141,7 @@ CREATE TABLE t_transaction_details (
 
 	item_name_receipt TEXT,
 	unit_price_ex_tax REAL,               -- 税抜単価（円）
-	quantity REAL NOT NULL,               -- 個数（0.25個など対応）
+	quantity REAL NOT NULL,               -- 数量（0.25個など対応）
 	content_amount_per_unit REAL,         -- 内容量(g)
 	tax_rate REAL NOT NULL,               -- 商品ごとに8%や10%を記録
 	discount_amount REAL DEFAULT 0,       -- 商品単位の割引額（円）
@@ -158,8 +158,9 @@ CREATE TABLE t_transaction_details (
 	-- FRIDGE/FREEZER/PANTRY: 在庫になる
 	-- GIFT: 他者へ譲渡（在庫にならず、栄養計上もしない）
 	destination TEXT CHECK(destination IN ('EAT_NOW', 'FRIDGE', 'FREEZER', 'PANTRY', 'GIFT')),
-	expiry_date REAL,                     -- 消費期限（シリアル値）
-	best_before_date REAL,                -- 賞味期限（シリアル値）
+
+	limit_date REAL,                   -- 消費期限か賞味期限（シリアル値）、目安の期限は含めない
+	limit_type TEXT CHECK(limit_type IN ('CONSUMPTION', 'BEST_BEFORE')), -- CONSUMPTION: 消費期限、BEST_BEFORE: 賞味期限
 
 	FOREIGN KEY (transaction_id) REFERENCES t_transactions(id),
 	FOREIGN KEY (category_id) REFERENCES m_categories(id)
@@ -178,7 +179,7 @@ CREATE TABLE t_payments (
 	transaction_id INTEGER,
 	wallet_id INTEGER,        -- NULL=おごってもらった
 	amount INTEGER NOT NULL,  -- 資産の増減：マイナスは支払い、プラスは受取・還元
-	remaining_amount INTEGER NOT NULL, -- 残高
+	remaining_amount INTEGER NOT NULL, -- 資金移動後（現在でない）の残高スナップショット（高速化のためのおまけの定数、計算ミス→再計算で変化あり）
 	expiry_at REAL,           -- この資金バッチの有効期限 (NULL=無期限)。特に期間限定ポイントに用いる。負の移動の場合は負債消滅等に利用可。
 	usage_restriction TEXT,   -- NULLなら用途制限なし、文字列があれば「用途限定」	note TEXT,
 	FOREIGN KEY (transaction_id) REFERENCES t_transactions(id),
@@ -194,7 +195,7 @@ CREATE TABLE t_wallet_balances (
 	-- 期限・用途が共に無制限な残高は NULL とする
 	origin_payment_id INTEGER, 
 
-	-- 残高単位は財布固有の単位で、ここでは円とは限らない
+	-- 残高単位は財布固有の単位で、ここでは円とは限らない（変数）
 	current_amount INTEGER NOT NULL DEFAULT 0,
 
 	updated_at REAL NOT NULL, -- 最終更新日時（シリアル値）
@@ -202,6 +203,8 @@ CREATE TABLE t_wallet_balances (
 	FOREIGN KEY (wallet_id) REFERENCES m_wallets(id),
 	FOREIGN KEY (origin_payment_id) REFERENCES t_payments(id)
 );
+
+-- t_paymentsのremaining_amountは資金移動時点の定数で、t_wallet_balancesのcurrent_amountは現在の変数であることに注意
 
 -- ==========================================
 -- V. 在庫と食事（在庫消費）
@@ -214,10 +217,7 @@ CREATE TABLE t_inventory (
 	detail_id INTEGER NOT NULL,           -- どの購入明細に由来するか
 	current_quantity REAL NOT NULL,       -- 現在の残量（大根0.25個、肉150gなど）
 
-	-- 管理用
-	target_consume_date REAL,             -- 目安期限（シリアル値）
-	location TEXT CHECK(location IN ('FRIDGE', 'FREEZER', 'PANTRY')), -- 保管場所の移動に対応
-	updated_at REAL NOT NULL,             -- 最終更新日時
+	updated_at REAL NOT NULL, -- 最終更新日時（シリアル値）
 
 	FOREIGN KEY (detail_id) REFERENCES t_transaction_details(id)
 );
