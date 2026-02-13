@@ -182,6 +182,13 @@ CREATE TABLE t_payments (
 	remaining_amount INTEGER NOT NULL, -- 資金移動後（現在でない）の残高スナップショット（高速化のためのおまけの定数、計算ミス→再計算で変化あり）
 	expiry_at REAL,           -- この資金バッチの有効期限 (NULL=無期限)。特に期間限定ポイントに用いる。負の移動の場合は負債消滅等に利用可。
 	usage_restriction TEXT,   -- NULLなら用途制限なし、文字列があれば「用途限定」	note TEXT,
+
+	-- 資金移動の性質（MAINの合計が商品価格と一致すれば良い）
+	-- MAIN: 商品価格との相殺対象 (買い物での支払い、割り勘の支払など)
+	-- SUB:  相殺対象外で付随的な移動 (ポイント付与、キャッシュバック)
+	-- INDEPENDENT: 相殺対象外で独立した資金移動（給与、利息など）
+	payment_type TEXT CHECK(payment_type IN ('MAIN', 'SUB', 'INDEPENDENT')) NOT NULL DEFAULT 'MAIN',
+
 	FOREIGN KEY (transaction_id) REFERENCES t_transactions(id),
 	FOREIGN KEY (wallet_id) REFERENCES m_wallets(id)
 );
@@ -247,6 +254,65 @@ CREATE TABLE t_meal_details (
 	FOREIGN KEY (detail_id) REFERENCES t_transaction_details(id)
 );
 
+-- ==========================================
+-- VI. 還元権利の管理（おまけ）
+-- ==========================================
+
+-- 1. 還元権利マスタ
+--    計算ロジックの定義。「期間」と「区切り」を持つことで、累計計算を可能にする。
+CREATE TABLE m_reward_rules (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	name TEXT NOT NULL,                   -- ルール名 (例: 楽天カード1%, 三井住友カード100万円修行, Tカード提示など)
+
+	-- 還元先
+	target_wallet_id INTEGER NOT NULL,    -- ポイントが貯まる財布ID
+
+	-- レート設定 (unit_amount円につき grant_amountポイント)
+	-- 例: 200円で1pt -> unit=200, grant=1, 100万円で1万pt -> unit=1000000, grant=10000
+	unit_amount INTEGER NOT NULL DEFAULT 200,
+	grant_amount INTEGER NOT NULL DEFAULT 1,
+
+	-- 期間集計ロジック
+	-- TRANSACTION: 取引ごとに切り捨て計算 (例: 198円なら0pt)
+	-- MONTHLY: 毎月指定日の期間内で累計し、閾値を超えた分をその取引で付与
+	-- YEARLY: 年間累計
+	period_type TEXT CHECK(period_type IN ('TRANSACTION', 'MONTHLY', 'YEARLY')) DEFAULT 'TRANSACTION',
+
+	-- 区切り日 (period_typeが MONTHLY/YEARLY の場合に使用)
+	-- 例: MONTHLYで16なら「当月16日〜来月15日」を1つの期間とみなす。
+	-- 例: YEARLYで40なら「当年4月9日〜来年4月8日」を1つの期間とみなす。（うるう年を考慮して3月1日からの累計日数を入れる）
+	-- 例: NULL・なら「当月1日〜末日」。
+	period_start_day INTEGER DEFAULT 1,
+
+	-- 期間内最大還元回数 (0=無制限)
+	max_times_per_period INTEGER,
+
+	FOREIGN KEY (target_wallet_id) REFERENCES m_wallets(id)
+);
+
+-- 2. 還元対象財布リスト
+--    「どの財布から支払った時にこの権利を行使できるか」
+--    ※クレジットカード払いは「銀行口座から直接支払った(デビットのような解釈) + クレカ還元権利の行使」の組み合わせで表現。
+CREATE TABLE m_reward_source_wallets (
+	rule_id INTEGER NOT NULL,
+	source_wallet_id INTEGER NOT NULL,
+	PRIMARY KEY (rule_id, source_wallet_id),
+	FOREIGN KEY (rule_id) REFERENCES m_reward_rules(id),
+	FOREIGN KEY (source_wallet_id) REFERENCES m_wallets(id)
+);
+
+-- 3. 還元権利行使ログ（資金移動に紐づく配列）
+--    ステータス管理は廃止。ここにレコードがある＝ポイント発生（0pt含む）とみなす。
+--    累計計算の結果、「今回は繰り上がりで1ptついた」「今回は端数のみで0pt」を即時記録する。
+CREATE TABLE t_reward_logs (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	payment_id INTEGER NOT NULL,          -- 元となる支払い（資金移動）ID
+	rule_id INTEGER NOT NULL,             -- 行使した還元ルール
+
+	FOREIGN KEY (payment_id) REFERENCES t_payments(id),
+	FOREIGN KEY (rule_id) REFERENCES m_reward_rules(id)
+);
+
 -- ＜初期設定＞
 
 -- ==========================================
@@ -296,9 +362,9 @@ INSERT INTO m_wallets (id, name, currency_id, wallet_group, is_active) VALUES
 
 -- 1. 普遍的食品 (野菜など: 個数/本数管理)
 INSERT INTO m_foods_universal (
-  name, standard_unit_name, standard_weight_g, edible_part_rate, shelf_life_days_guideline,
-  energy_kcal, protein_g, fat_g, carb_g, salt_equiv_g,
-  taste_sweet, taste_salty, taste_sour, taste_bitter, taste_umami, taste_pungent, taste_cooling, taste_astringency, taste_richness, taste_sharpness
+	name, standard_unit_name, standard_weight_g, edible_part_rate, shelf_life_days_guideline,
+	energy_kcal, protein_g, fat_g, carb_g, salt_equiv_g,
+	taste_sweet, taste_salty, taste_sour, taste_bitter, taste_umami, taste_pungent, taste_cooling, taste_astringency, taste_richness, taste_sharpness
 ) VALUES
 ('大根', '本', 1000.0, 0.95, 7.0, 15.0, 0.4, 0.1, 3.2, 0.0, 2.5, 0.0, 0.0, 0.5, 1.2, 1.5, 0.0, 0.0, 1.0, 3.0),
 ('キャベツ', '個', 1200.0, 0.85, 10.0, 23.0, 1.3, 0.2, 5.2, 0.0, 3.5, 0.0, 0.0, 0.2, 1.5, 0.0, 0.0, 0.0, 1.5, 1.0),
@@ -306,9 +372,9 @@ INSERT INTO m_foods_universal (
 
 -- 2. 計測食品 (調味料など: 100g基準)
 INSERT INTO m_foods_measured (
-  name, is_seasoning,
-  energy_kcal, protein_g, fat_g, carb_g, salt_equiv_g,
-  taste_sweet, taste_salty, taste_sour, taste_bitter, taste_umami, taste_pungent, taste_cooling, taste_astringency, taste_richness, taste_sharpness
+	name, is_seasoning,
+	energy_kcal, protein_g, fat_g, carb_g, salt_equiv_g,
+	taste_sweet, taste_salty, taste_sour, taste_bitter, taste_umami, taste_pungent, taste_cooling, taste_astringency, taste_richness, taste_sharpness
 ) VALUES
 ('豆板醤', 1, 100.0, 10.0, 5.0, 15.0, 12.0, 1.0, 9.0, 1.5, 0.5, 5.5, 9.0, 0.0, 0.5, 6.0, 4.0),
 ('醤油', 1, 71.0, 7.7, 0.0, 7.9, 14.5, 1.5, 10.0, 2.0, 0.5, 8.5, 0.0, 0.0, 1.0, 5.0, 5.0),
@@ -316,9 +382,9 @@ INSERT INTO m_foods_measured (
 
 -- 3. 加工食品・外食 (1食/1個単位)
 INSERT INTO m_foods_processed (
-  name, manufacturer, serving_name, weight_per_serving_g,
-  energy_kcal, protein_g, fat_g, carb_g, salt_equiv_g,
-  taste_sweet, taste_salty, taste_sour, taste_bitter, taste_umami, taste_pungent, taste_cooling, taste_astringency, taste_richness, taste_sharpness
+	name, manufacturer, serving_name, weight_per_serving_g,
+	energy_kcal, protein_g, fat_g, carb_g, salt_equiv_g,
+	taste_sweet, taste_salty, taste_sour, taste_bitter, taste_umami, taste_pungent, taste_cooling, taste_astringency, taste_richness, taste_sharpness
 ) VALUES
 ('牛丼(並)', '吉野家', '1杯', 350.0, 230.0, 8.5, 14.0, 18.0, 1.5, 4.0, 4.5, 0.0, 0.0, 5.0, 1.0, 0.0, 0.0, 7.0, 2.0),
 ('プレミアムロールケーキ', 'ローソン', '1個', 100.0, 315.0, 4.5, 22.0, 24.5, 0.2, 9.0, 0.5, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 8.0, 1.0);
