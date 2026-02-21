@@ -33,8 +33,9 @@ CREATE TABLE m_wallets (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	name TEXT NOT NULL,
 	currency_id INTEGER,
-	-- 財布の種類はお金の性質ではなく「管理上の分類」として残すが、論理的な扱いは全て同等とする
-	wallet_group TEXT CHECK(wallet_group IN ('CASH', 'BANK', 'CREDIT', 'PREPAID', 'POINT')) DEFAULT 'CASH',
+	-- 財布の種類はお金の性質ではなく「管理上の分類」として残す。
+	-- RISKYはリスク資産を表し、別の財布から投資する瞬間のお金を保存しておき、価値変動を反映させた後に別の財布に戻す。
+	wallet_group TEXT CHECK(wallet_group IN ('CASH', 'BANK', 'POINT', 'RISKY')) DEFAULT 'CASH',
 	is_active INTEGER DEFAULT 1,
 	closed_at REAL,                       -- 財布廃止日時（シリアル値）
 	FOREIGN KEY (currency_id) REFERENCES m_currencies(id)
@@ -353,8 +354,9 @@ INSERT INTO m_wallets (id, name, currency_id, wallet_group, is_active) VALUES
 (1, '携帯用財布', 1, 'CASH', 1),
 (2, 'メイン銀行口座', 1, 'BANK', 1),
 (3, '自宅金庫', 1, 'CASH', 1),
-(4, 'ヨドバシゴールドポイント', 2, 'POINT', 1),
-(5, 'Vポイント', 11, 'POINT', 1);
+(4, '投資信託', 1, 'RISKY', 1),
+(5, 'ヨドバシゴールドポイント', 2, 'POINT', 1),
+(6, 'Vポイント', 11, 'POINT', 1);
 
 -- ==========================================
 -- II. 食品・栄養素データの初期投入
@@ -422,7 +424,8 @@ INSERT INTO m_categories (name, type) VALUES
 ('お小遣い', 'INCOME'),
 ('還元・キャッシュバック', 'INCOME'),
 -- 不定なカテゴリ
-('盗難・謎収入', NULL);
+('盗難・謎収入', NULL),
+('投資価値変動', NULL);
 
 -- 4. 取引: データ無しとする
 
@@ -467,12 +470,12 @@ INSERT INTO m_reward_rules (
 	period_type, period_start_day, max_times_per_period
 ) VALUES 
 -- クレジットカード利用、Vポイント還元（月間累計）
-(1, '三井住友カードで支払い 0.5%還元', 5, 200, 1, 'MONTHLY', 16, NULL),
-(2, '三井住友カードで支払い 100万円修行', 5, 1000000, 10000, 'YEARLY', 1, 1),
+(1, '三井住友カードで支払い 0.5%還元', 6, 200, 1, 'MONTHLY', 16, NULL),
+(2, '三井住友カードで支払い 100万円修行', 6, 1000000, 10000, 'YEARLY', 1, 1),
 -- 家電量販店ポイント ヨドバシゴールドポイント還元（即時・取引毎）
-(3, 'ヨドバシ カード提示 10%還元', 4, 100, 10, 'TRANSACTION', NULL, NULL),
+(3, 'ヨドバシ カード提示 10%還元', 5, 100, 10, 'TRANSACTION', NULL, NULL),
 -- 共通ポイントカード提示（即時・取引毎）
-(4, 'Tポイントカード提示 0.5%還元', 5, 200, 1, 'TRANSACTION', NULL, NULL);
+(4, 'Tポイントカード提示 0.5%還元', 6, 200, 1, 'TRANSACTION', NULL, NULL);
 
 -- 2. 還元対象財布リスト (m_reward_source_wallets)
 --   どの財布から支払った時に、どのルールが適用可能かを定義する。
