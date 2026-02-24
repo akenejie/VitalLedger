@@ -121,6 +121,18 @@ CREATE TABLE t_transactions (
 	FOREIGN KEY (branch_id) REFERENCES m_store_branches(id)
 );
 
+-- 取引に紐づくレシート画像
+-- 1つの取引(t_transactions)に対して複数枚の画像を保持可能とする。
+CREATE TABLE t_transaction_images (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	transaction_id INTEGER NOT NULL,      -- 紐付け先の取引ID
+	file_name TEXT NOT NULL,              -- 画像のファイル名（またはパス）
+	display_order INTEGER DEFAULT 1,      -- 1枚目、2枚目などの表示順
+	captured_at REAL,                     -- 撮影/登録日時（シリアル値）
+	note TEXT,                            -- メモ（「裏面」「保証書も含む」など）
+	FOREIGN KEY (transaction_id) REFERENCES t_transactions(id)
+);
+
 -- 商流：商品ごとの明細（ここを全部足すと「支払うべき額」になる）
 CREATE TABLE t_transaction_details (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
